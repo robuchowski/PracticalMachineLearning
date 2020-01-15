@@ -1,0 +1,148 @@
+---
+title: "Practical Machine Learning Project"
+author: "Ryan Obuchowski"
+date: "1/15/2020"
+output: html_document
+---
+
+## Project Overview
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The dataset used in this project is courtest of “Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers’ Data Classification of Body Postures and Movements”
+
+
+## Project Goal 
+The goal of this project is to predict the manner in which they did the exercise by using three predicitive machine learning algorithms: Random forests, Classification trees, and Generalized Boosted Model to find the best model that has the least out-of-sample error on the data, and then apply this model to a validation set of data.  
+
+# Package Loading
+```{r, echo=TRUE}
+## load the necessary packages needed for this project
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(gbm)
+library(caret)
+library(e1071)
+```
+
+# Getting, Cleaning, and Exploring the data
+```{r, echo=TRUE}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "trainingdata.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "testingdata.csv")
+train_in <- read.csv('trainingdata.csv', header = T)
+valid_in <- read.csv('testingdata.csv', header = T)
+dim(valid_in)
+dim(train_in)
+```
+As shown, there are 19622 Observations and 160 Variables in the Training dataset 
+
+## Cleaning the Data
+This data contains many missing values, which we do not want for this project so we get rid of them.  
+```{r, echo=TRUE}
+trainData <- train_in[, colSums(is.na(train_in)) == 0]
+validData <- valid_in[, colSums(is.na(valid_in)) ==0]
+dim(trainData)
+dim(validData)
+```
+
+### The first 7 variables have minimal impact on "classe" so we remove them
+```{r, echo=TRUE}
+trainData <- trainData[, -c(1:7)]
+validData<- validData[, -c(1:7)]
+dim(trainData)
+dim(validData)
+```
+
+### Separate the Datasets for Prediction
+We need to split the training data into train data and test data for Cross Validation.  We will separate the data into 70% train, which we will train our model on this data and the remaining 30% will be our test data to test our models later. 
+The validData will remain separate and stay as it is for later use to test the production algorithm on the 20 cases. 
+```{r, echo=TRUE}
+set.seed(1441)
+inTrain <- createDataPartition(trainData$classe, p=0.7, list = FALSE)
+trainData <- trainData[inTrain, ]
+testData <- trainData[-inTrain, ]
+dim(trainData)
+dim(testData)
+```
+
+### Removing Near-Zero-Variance Variables
+```{r, echo=TRUE}
+NZV <- nearZeroVar(trainData)
+trainData <- trainData[, -NZV]
+testData <- testData[, -NZV]
+dim(trainData)
+dim(testData)
+```
+After cleaning the data and removing the near-zero-variance variables, we now have 53 variables to work with in this project. 
+
+# Model Building
+As stated in the overview, we will use three algorithms to predict the outcome. 
+        1. Classification Trees
+        2. Random forests
+        3. Generalized Boosted Model
+
+## Classification Trees
+We will create the model on the train data nd then plot the classification tree, and then validate the model we create on the test data to see how well it performs by looking at the accuracy variable. 
+```{r, echo=TRUE}
+set.seed(14411)
+TreeMod1 <- rpart(classe ~ ., data = trainData, method = "class")
+fancyRpartPlot(TreeMod1)
+predictTreeMod1 <- predict(TreeMod1, testData, type = "class")
+matrixTree <- confusionMatrix(predictTreeMod1, testData$classe)
+matrixTree
+```
+
+**Plot Matrix Results**
+```{r, echo=TRUE}
+plot(matrixTree$table, col = matrixTree$byClass, main = paste("Decision Tree - Accuracy =", round(matrixTree$overall['Accuracy'], 4)))
+```
+We see that the accuracy rate of this mode is 0.7484, which is low. In addition, this means that our out-of-sample error is about 0.25, which is not ideal.
+
+## Random Forest
+First, we will determine the model using the train data. 
+```{r, echo=TRUE}
+controlRF <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+modRF1 <- train(classe ~ ., data = trainData, method="rf", trControl=controlRF)
+modRF1$finalModel
+```
+Then, we validate the "modRF1" model on the test data to measure how it performs like we did previoulsy with classification trees.
+```{r, echo=TRUE}
+predictRF1 <- predict(modRF1, newdata= testData)
+matrixRf <- confusionMatrix(predictRF1, testData$classe)
+matrixRf
+```
+The accuracy rate of random forest is very high with an **Accuracy : 1.** This means that the out-of-sample error is equal to 0, but this could be due to overfitting.
+
+**Plot the model**
+```{r, echo=TRUE}
+plot(matrixRf$table, col= matrixRf$byClass, main = paste("Random Forest Confusion Matrix: Accuracy=", round(matrixRf$overall['Accuracy'], 4)))
+```
+
+## Generalized Boosted Regression Model
+```{r, echo=TRUE}
+set.seed(14411)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM <- train(classe ~ ., data=trainData, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+# print the model summary
+print(modGBM)
+```
+
+### Validate the GBM Model
+```{r, echo=TRUE}
+predictGBM <- predict(modGBM, newdata= testData)
+matrixGBM <- confusionMatrix(predictGBM, testData$classe)
+matrixGBM
+```
+
+The accuracy rate using the GBM is high as well with an **Accuracy: 0.9757** which gives us an out-of-sample error of 0.0243. 
+
+## Applying the best model
+By comparing the three models against eachother, we see that two have very high accuracy rates. THe GBM model and the Random Forest model, but the Random Forest edged the GBM model by a very slight margin and won.  Therefore, we will use it on the validation data. 
+```{r, echo=TRUE}
+Results <- predict(modRF1, newdata= validData)
+Results
+```
+
+
